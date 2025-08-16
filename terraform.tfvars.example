@@ -1,0 +1,24 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and update with your values
+
+azure_region        = "centralus"
+resource_group_name = "My_Lab"
+control_vm_name     = "controlNode1"
+vm_size            = "Standard_DS1_v2"
+admin_username     = "adminuser"
+admin_password     = "YourSecurePassword123!"
+os_disk_name       = "controlNodeDisk1"
+
+# Network configuration
+vnet_name                     = "lab-vnet"
+vnet_address_space            = ["10.0.0.0/16"]
+subnet_name                   = "internal-subnet"
+subnet_address_prefix         = "10.0.1.0/24"
+control_network_interface_name = "control-nic"
+control_public_ip_name        = "control-public-ip"
+windows_network_interface_name = "windows-nic"
+windows_public_ip_name        = "windows-public-ip"
+
+# Security configuration
+nsg_name                   = "lab-nsg"
+ssh_source_address_prefix  = "*"  # Use "*" for any IP, or specify your public IP like "203.0.113.0/32"
