@@ -11,73 +11,28 @@ terraform {
 }
 
 provider "azurerm" {
-  features {}
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+  }
+}
+
+# Data source to get current public IP (optional - can be overridden by variable)
+data "http" "myip" {
+  url = "https://ipv4.icanhazip.com"
 }
 
 # Local values for cloud-init script
 locals {
-  cloud_init_script = <<-EOF
-    #cloud-config
-    package_update: true
-    package_upgrade: true
-    
-    packages:
-      - python3
-      - python3-pip
-      - python3-venv
-      - software-properties-common
-      - openjdk-11-jdk
-      - git
-      - curl
-      - wget
-      - unzip
-      - apt-transport-https
-      - ca-certificates
-      - gnupg
-      - lsb-release
-    
-    runcmd:
-      # Install Ansible
-      - add-apt-repository --yes --update ppa:ansible/ansible
-      - apt-get update -y
-      - apt-get install -y ansible
-      
-      # Install Jenkins
-      - wget -q -O - https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo apt-key add -
-      - sh -c 'echo deb https://pkg.jenkins.io/debian-stable binary/ > /etc/apt/sources.list.d/jenkins.list'
-      - apt-get update -y
-      - apt-get install -y jenkins
-      - systemctl start jenkins
-      - systemctl enable jenkins
-      
-      # Install Docker
-      - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-      - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-      - apt-get update -y
-      - apt-get install -y docker-ce docker-ce-cli containerd.io
-      - usermod -aG docker ${var.admin_username}
-      
-      # Create status file
-      - echo "Installation completed at $(date)" > /tmp/installation-complete.txt
-      - echo "Jenkins initial admin password location: /var/lib/jenkins/secrets/initialAdminPassword" >> /tmp/installation-complete.txt
-      
-    write_files:
-      - path: /tmp/software-versions.sh
-        content: |
-          #!/bin/bash
-          echo "=== Installed Software Versions ==="
-          python3 --version
-          pip3 --version
-          ansible --version
-          java -version
-          jenkins --version
-          docker --version
-        permissions: '0755'
-    
-    final_message: "Software installation completed successfully!"
-  EOF
+  # Use the variable if provided, otherwise fall back to auto-detected IP
+  ssh_source_ip = var.ssh_source_address_prefix != "*" ? var.ssh_source_address_prefix : "${chomp(data.http.myip.response_body)}/32"
+  
+  # Load cloud-init script from external file and substitute variables
+  cloud_init_script = templatefile("${path.module}/${var.cloud_init_script_path}", {
+    admin_username = var.admin_username
+  })
 }
-
 
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
@@ -114,7 +69,7 @@ resource "azurerm_network_security_group" "nsg" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "22"
-    source_address_prefix      = var.ssh_source_address_prefix
+    source_address_prefix      = local.ssh_source_ip
     destination_address_prefix = "*"
   }
 
@@ -126,7 +81,43 @@ resource "azurerm_network_security_group" "nsg" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "8080"
-    source_address_prefix      = var.ssh_source_address_prefix
+    source_address_prefix      = local.ssh_source_ip
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "WazuhDashboard"
+    priority                   = 1003
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = local.ssh_source_ip
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "WazuhAgent"
+    priority                   = 1004
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "1514"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "WazuhAgentAuth"
+    priority                   = 1005
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "1515"
+    source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
 }
@@ -160,6 +151,7 @@ resource "azurerm_network_interface" "nic" {
   }
 }
 
+# Create the Control Node VM
 resource "azurerm_virtual_machine" "control_vm" {
   name                  = var.control_vm_name
   location              = azurerm_resource_group.rg.location
@@ -193,13 +185,99 @@ resource "azurerm_virtual_machine" "control_vm" {
   }
 }
 
+# Auto-shutdown configuration for the VM
+resource "azurerm_resource_group_template_deployment" "vm_auto_shutdown" {
+  count               = var.auto_shutdown_enabled ? 1 : 0
+  name                = "auto-shutdown-${var.control_vm_name}"
+  resource_group_name = azurerm_resource_group.rg.name
+  deployment_mode     = "Incremental"
+
+  template_content = jsonencode({
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {},
+    "variables": {},
+    "resources": [
+      {
+        "type": "Microsoft.DevTestLab/schedules",
+        "apiVersion": "2018-09-15",
+        "name": "shutdown-computevm-${azurerm_virtual_machine.control_vm.name}",
+        "location": azurerm_resource_group.rg.location,
+        "properties": {
+          "status": "Enabled",
+          "taskType": "ComputeVmShutdownTask",
+          "dailyRecurrence": {
+            "time": var.auto_shutdown_time
+          },
+          "timeZoneId": var.auto_shutdown_timezone,
+          "targetResourceId": azurerm_virtual_machine.control_vm.id,
+          "notificationSettings": {
+            "status": var.auto_shutdown_notification_email != "" ? "Enabled" : "Disabled",
+            "emailRecipient": var.auto_shutdown_notification_email,
+            "timeInMinutes": 30
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    environment = "lab"
+    auto_shutdown = "enabled"
+  }
+}
+
 # Output the public IP for easy access
 output "control_vm_public_ip" {
   value = azurerm_public_ip.control_public_ip.ip_address
   description = "Public IP address of the control VM"
 }
 
+# Output the Jenkins URL
 output "jenkins_url" {
   value = "http://${azurerm_public_ip.control_public_ip.ip_address}:8080"
   description = "Jenkins URL - use this to access Jenkins web interface"
+}
+
+output "wazuh_dashboard_url" {
+  value = "https://${azurerm_public_ip.control_public_ip.ip_address}:443"
+  description = "Wazuh Dashboard URL - use this to access Wazuh SIEM web interface"
+}
+
+output "wazuh_server_ip" {
+  value = azurerm_public_ip.control_public_ip.ip_address
+  description = "Wazuh Server IP - use this IP to configure Wazuh agents"
+}
+
+output "control_vm_fqdn" {
+  value = "${azurerm_virtual_machine.control_vm.name}.${azurerm_resource_group.rg.location}.cloudapp.azure.com"
+  description = "Fully Qualified Domain Name of the control VM"
+}
+
+output "control_vm_private_ip" {
+  value = azurerm_network_interface.nic.private_ip_address
+  description = "Private IP address of the control VM within the VNet"
+}
+
+output "vm_network_info" {
+  value = {
+    public_ip    = azurerm_public_ip.control_public_ip.ip_address
+    private_ip   = azurerm_network_interface.nic.private_ip_address
+    fqdn         = "${azurerm_virtual_machine.control_vm.name}.${azurerm_resource_group.rg.location}.cloudapp.azure.com"
+    vm_name      = azurerm_virtual_machine.control_vm.name
+    location     = azurerm_resource_group.rg.location
+  }
+  description = "Complete network information for the control VM"
+}
+
+output "auto_shutdown_info" {
+  value = var.auto_shutdown_enabled ? {
+    enabled       = true
+    shutdown_time = var.auto_shutdown_time
+    timezone      = var.auto_shutdown_timezone
+    notification  = var.auto_shutdown_notification_email != "" ? "Enabled" : "Disabled"
+  } : {
+    enabled = false
+  }
+  description = "Auto-shutdown configuration for the VM"
 }

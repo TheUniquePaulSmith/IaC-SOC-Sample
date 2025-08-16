@@ -21,4 +21,13 @@ windows_public_ip_name        = "windows-public-ip"
 
 # Security configuration
 nsg_name                   = "lab-nsg"
-ssh_source_address_prefix  = "*"  # Use "*" for any IP, or specify your public IP like "203.0.113.0/32"
+ssh_source_address_prefix  = "*"  # Use "*" for auto-detect your IP, or specify like "203.0.113.1/32" for specific IP
+
+# Cloud-init configuration
+cloud_init_script_path     = "scripts/cloud-init.yaml"  # Use "scripts/cloud-init-basic.yaml" for minimal setup
+
+# Auto-shutdown configuration
+auto_shutdown_enabled            = true
+auto_shutdown_time              = "0700"  # 7:00 AM in 24-hour format
+auto_shutdown_timezone          = "UTC"   # Use your timezone, e.g., "Eastern Standard Time", "Pacific Standard Time"
+auto_shutdown_notification_email = ""     # Optional: email for shutdown notifications
