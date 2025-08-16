@@ -12,9 +12,65 @@ The SOC lab consists of:
 - **Security**: Network Security Group with service-specific access rules
 - **Management**: Auto-shutdown functionality for cost optimization
 
+```mermaid
+graph TB
+    Admin[👤 Administrator] 
+    
+    subgraph Azure[☁️ Azure VNet 10.0.0.0/16]
+        subgraph Control[🐧 Control Node - Ubuntu 22.04]
+            Wazuh[Wazuh SIEM:443]
+            Jenkins[Jenkins:8080]
+            SSH1[SSH:22]
+        end
+        
+        subgraph Windows[🪟 Windows 11 Target]
+            Agent[Wazuh Agent]
+            RDP[RDP:3389]
+            SSH2[SSH:22]
+        end
+        
+        NSG[🔒 Network Security Group<br/>Restricts external access to Admin IP]
+    end
+    
+    %% Admin access (restricted by NSG)
+    Admin -->|Secure Access| Control
+    Admin -->|Secure Access| Windows
+    
+    %% Internal monitoring
+    Agent -.->|Security Data| Wazuh
+    
+    %% Auto-shutdown
+    Schedule[⏰ Auto-Shutdown<br/>Daily cost savings]
+    Schedule -.-> Control
+    Schedule -.-> Windows
+    
+    classDef admin fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef azure fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef security fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    
+    class Admin admin
+    class Azure,Control,Windows azure
+    class NSG,Schedule security
+```
+
+### Access Control Matrix
+
+| Service | Port | Access | Purpose | Authentication |
+|---------|------|--------|---------|----------------|
+| **Control Node Access** |
+| SSH | 22 | Admin IP Only | System administration | Username/Password |
+| Jenkins | 8080 | Admin IP Only | CI/CD management | Web UI login |
+| Wazuh Dashboard | 443 | Admin IP Only | SIEM monitoring | Web UI login |
+| **Windows Target Access** |
+| RDP | 3389 | Admin IP Only | Desktop administration | Windows login |
+| SSH | 22 | Admin IP Only | Command line access | Username/Password |
+| WinRM | 5985/5986 | Admin IP Only | PowerShell remoting | Windows authentication |
+| **Internal Communication** |
+| Wazuh Agent | 1514/1515 | VNet traffic | Security monitoring | Agent certificates |
+
 ## Prerequisites
-- Azure CLI installed and authenticated
-- Terraform installed (version 0.12+)
+- [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli) installed and authenticated
+- [Terraform](https://www.terraform.io/downloads.html) installed (version 0.12+)
 - SSH key pair for Linux VM access
 
 ## Quick Start
