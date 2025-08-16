@@ -32,6 +32,18 @@ locals {
   cloud_init_script = templatefile("${path.module}/${var.cloud_init_script_path}", {
     admin_username = var.admin_username
   })
+  
+  # Windows 11 setup script with Wazuh server IP substitution  
+  win11_setup_script = templatefile("${path.module}/scripts/win11-setup.ps1", {
+    wazuh_server_ip    = azurerm_network_interface.nic.private_ip_address
+    win11_admin_username = var.win11_admin_username
+  })
+  
+  # Create a base64 encoded version of the script to avoid escaping issues
+  win11_script_b64 = base64encode(local.win11_setup_script)
+  
+  # Create a simple bootstrap command that decodes and executes the script
+  win11_bootstrap_command = "powershell -ExecutionPolicy Unrestricted -Command \"New-Item -ItemType Directory -Force -Path 'C:\\\\temp'; [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${local.win11_script_b64}')) | Out-File -FilePath 'C:\\\\temp\\\\win11-setup.ps1' -Encoding UTF8; & 'C:\\\\temp\\\\win11-setup.ps1'\""
 }
 
 resource "azurerm_resource_group" "rg" {
@@ -120,6 +132,54 @@ resource "azurerm_network_security_group" "nsg" {
     source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
+
+  security_rule {
+    name                       = "RDP"
+    priority                   = 1006
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3389"
+    source_address_prefix      = local.ssh_source_ip
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "WinRM-HTTP"
+    priority                   = 1007
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "5985"
+    source_address_prefix      = local.ssh_source_ip
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "WinRM-HTTPS"
+    priority                   = 1008
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "5986"
+    source_address_prefix      = local.ssh_source_ip
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "SSH-Windows"
+    priority                   = 1009
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = local.ssh_source_ip
+    destination_address_prefix = "*"
+  }
 }
 
 # Associate Network Security Group to Subnet
@@ -185,6 +245,130 @@ resource "azurerm_virtual_machine" "control_vm" {
   }
 }
 
+# Create Windows 11 public IP
+resource "azurerm_public_ip" "win11_public_ip" {
+  name                = var.windows_public_ip_name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# Create Windows 11 network interface
+resource "azurerm_network_interface" "win11_nic" {
+  name                = var.windows_network_interface_name
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnet.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.win11_public_ip.id
+  }
+}
+
+# Create Windows 11 VM with custom script extension
+resource "azurerm_virtual_machine" "win11_vm" {
+  name                  = var.win11_vm_name
+  location              = azurerm_resource_group.rg.location
+  resource_group_name   = azurerm_resource_group.rg.name
+  network_interface_ids = [azurerm_network_interface.win11_nic.id]
+  vm_size               = var.win11_vm_size
+
+  storage_image_reference {
+    publisher = "MicrosoftWindowsDesktop"
+    offer     = "Windows-11"
+    sku       = "win11-22h2-ent"
+    version   = "latest"
+  }
+
+  storage_os_disk {
+    name              = var.win11_os_disk_name
+    caching           = "ReadWrite"
+    create_option     = "FromImage"
+    managed_disk_type = "Premium_LRS"
+  }
+
+  os_profile {
+    computer_name  = var.win11_vm_name
+    admin_username = var.win11_admin_username
+    admin_password = var.win11_admin_password
+  }
+
+  os_profile_windows_config {
+    provision_vm_agent = true
+  }
+
+  tags = {
+    Environment = "SOC-Lab"
+    Purpose     = "Managed-Target"
+    OS          = "Windows-11"
+  }
+}
+
+# Windows 11 VM Extension for custom script execution
+resource "azurerm_virtual_machine_extension" "win11_setup" {
+  name                 = "win11-setup"
+  virtual_machine_id   = azurerm_virtual_machine.win11_vm.id
+  publisher            = "Microsoft.Compute"
+  type                 = "CustomScriptExtension"
+  type_handler_version = "1.10"
+
+  settings = jsonencode({
+    fileUris = []
+  })
+
+  protected_settings = jsonencode({
+    commandToExecute = local.win11_bootstrap_command
+  })
+
+  depends_on = [azurerm_virtual_machine.control_vm]
+}
+
+# Auto-shutdown configuration for Windows 11 VM
+resource "azurerm_resource_group_template_deployment" "win11_auto_shutdown" {
+  count               = var.auto_shutdown_enabled ? 1 : 0
+  name                = "auto-shutdown-${var.win11_vm_name}"
+  resource_group_name = azurerm_resource_group.rg.name
+  deployment_mode     = "Incremental"
+
+  template_content = jsonencode({
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {},
+    "variables": {},
+    "resources": [
+      {
+        "type": "Microsoft.DevTestLab/schedules",
+        "apiVersion": "2018-09-15",
+        "name": "shutdown-computevm-${azurerm_virtual_machine.win11_vm.name}",
+        "location": azurerm_resource_group.rg.location,
+        "properties": {
+          "status": "Enabled",
+          "taskType": "ComputeVmShutdownTask",
+          "dailyRecurrence": {
+            "time": var.auto_shutdown_time
+          },
+          "timeZoneId": var.auto_shutdown_timezone,
+          "targetResourceId": azurerm_virtual_machine.win11_vm.id,
+          "notificationSettings": {
+            "status": var.auto_shutdown_notification_email != "" ? "Enabled" : "Disabled",
+            "emailRecipient": var.auto_shutdown_notification_email,
+            "timeInMinutes": 30
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    environment = "lab"
+    auto_shutdown = "enabled"
+    vm_type = "windows"
+  }
+}
+
 # Auto-shutdown configuration for the VM
 resource "azurerm_resource_group_template_deployment" "vm_auto_shutdown" {
   count               = var.auto_shutdown_enabled ? 1 : 0
@@ -226,6 +410,8 @@ resource "azurerm_resource_group_template_deployment" "vm_auto_shutdown" {
     auto_shutdown = "enabled"
   }
 }
+
+## OUTPUTS
 
 # Output the public IP for easy access
 output "control_vm_public_ip" {
@@ -280,4 +466,42 @@ output "auto_shutdown_info" {
     enabled = false
   }
   description = "Auto-shutdown configuration for the VM"
+}
+
+# Windows 11 VM outputs
+output "win11_vm_public_ip" {
+  value = azurerm_public_ip.win11_public_ip.ip_address
+  description = "Public IP address of the Windows 11 VM"
+}
+
+output "win11_vm_private_ip" {
+  value = azurerm_network_interface.win11_nic.private_ip_address
+  description = "Private IP address of the Windows 11 VM within the VNet"
+}
+
+output "win11_vm_fqdn" {
+  value = "${azurerm_virtual_machine.win11_vm.name}.${azurerm_resource_group.rg.location}.cloudapp.azure.com"
+  description = "Fully Qualified Domain Name of the Windows 11 VM"
+}
+
+output "win11_rdp_connection" {
+  value = "mstsc /v:${azurerm_public_ip.win11_public_ip.ip_address}"
+  description = "RDP connection string for Windows 11 VM"
+}
+
+output "win11_ssh_connection" {
+  value = "ssh ${var.win11_admin_username}@${azurerm_public_ip.win11_public_ip.ip_address}"
+  description = "SSH connection string for Windows 11 VM"
+}
+
+output "windows_network_info" {
+  value = {
+    public_ip    = azurerm_public_ip.win11_public_ip.ip_address
+    private_ip   = azurerm_network_interface.win11_nic.private_ip_address
+    fqdn         = "${azurerm_virtual_machine.win11_vm.name}.${azurerm_resource_group.rg.location}.cloudapp.azure.com"
+    vm_name      = azurerm_virtual_machine.win11_vm.name
+    admin_user   = var.win11_admin_username
+    wazuh_server = azurerm_network_interface.nic.private_ip_address
+  }
+  description = "Complete network information for the Windows 11 VM"
 }
