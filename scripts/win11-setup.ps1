@@ -27,23 +27,29 @@ try {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
     # Install OpenSSH Server
-    Write-Log "Installing OpenSSH Server..."
-    choco install openssh -y
+   Get-WindowsCapability -Name OpenSSH.Server* -Online | Add-WindowsCapability -Online
+   Set-Service -Name sshd -StartupType Automatic -Status Running
 
-    # Configure OpenSSH Server
-    Write-Log "Configuring OpenSSH Server..."
-    Start-Service sshd
-    Set-Service -Name sshd -StartupType 'Automatic'
+$firewallParams = @{
+    Name        = 'sshd-Server-In-TCP'
+    DisplayName = 'Inbound rule for OpenSSH Server (sshd) on TCP port 22'
+    Action      = 'Allow'
+    Direction   = 'Inbound'
+    Enabled     = 'True'  # This is not a boolean but an enum
+    Profile     = 'Any'
+    Protocol    = 'TCP'
+    LocalPort   = 22
+}
+New-NetFirewallRule @firewallParams
 
-    # Configure SSH for public key authentication
-    $sshdConfigPath = "C:\ProgramData\ssh\sshd_config"
-    if (Test-Path $sshdConfigPath) {
-        (Get-Content $sshdConfigPath) -replace '#PubkeyAuthentication yes', 'PubkeyAuthentication yes' | Set-Content $sshdConfigPath
-        (Get-Content $sshdConfigPath) -replace '#PasswordAuthentication yes', 'PasswordAuthentication yes' | Set-Content $sshdConfigPath
-    }
-
-    # Restart SSH service
-    Restart-Service sshd
+$shellParams = @{
+    Path         = 'HKLM:\SOFTWARE\OpenSSH'
+    Name         = 'DefaultShell'
+    Value        = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+    PropertyType = 'String'
+    Force        = $true
+}
+New-ItemProperty @shellParams
 
     # Configure Windows Firewall - Allow SSH
     Write-Log "Configuring Windows Firewall for SSH..."
