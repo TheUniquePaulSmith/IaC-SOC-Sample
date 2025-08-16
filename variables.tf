@@ -1,7 +1,3 @@
-data "http" "myip" {
-  url = "https://ipv4.icanhazip.com"
-}
-
 variable "azure_region" {
   description = "The Azure region where resources will be deployed"
   type        = string
@@ -23,7 +19,7 @@ variable "control_vm_name" {
 variable "vm_size" {
   description = "Size of the virtual machine"
   type        = string
-  default     = "Standard_DS1_v2"
+  default     = "Standard_D4as_v6" #this is 4 vcpus with 17GiB RAM
 }
 
 variable "admin_username" {
@@ -104,7 +100,37 @@ variable "nsg_name" {
 }
 
 variable "ssh_source_address_prefix" {
-  description = "Source IP address prefix allowed for SSH access (use * for any, or specify your public IP)"
+  description = "Source IP address prefix allowed for SSH access (use * for any, or specify your public IP like 203.0.113.1/32)"
   type        = string
-  default     = ["${chomp(data.http.myip.body)}"]
+  default     = "*"
+}
+
+variable "cloud_init_script_path" {
+  description = "Path to the cloud-init script file"
+  type        = string
+  default     = "scripts/cloud-init.yaml"
+}
+
+variable "auto_shutdown_time" {
+  description = "Time to automatically shutdown the VM (24-hour format, e.g., '0700' for 7:00 AM)"
+  type        = string
+  default     = "0700"
+}
+
+variable "auto_shutdown_timezone" {
+  description = "Timezone for the auto-shutdown schedule"
+  type        = string
+  default     = "CST"
+}
+
+variable "auto_shutdown_enabled" {
+  description = "Enable automatic VM shutdown"
+  type        = bool
+  default     = true
+}
+
+variable "auto_shutdown_notification_email" {
+  description = "Email address for shutdown notifications (optional)"
+  type        = string
+  default     = ""
 }

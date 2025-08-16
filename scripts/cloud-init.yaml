@@ -1,0 +1,79 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - python3
+  - python3-pip
+  - python3-venv
+  - software-properties-common
+  - openjdk-11-jdk
+  - git
+  - curl
+  - wget
+  - unzip
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - lsb-release
+
+runcmd:
+  # Install Ansible
+  - add-apt-repository --yes --update ppa:ansible/ansible
+  - apt-get update -y
+  - apt-get install -y ansible
+  
+  # Install Jenkins
+  - "wget -q -O - https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | sudo apt-key add -"
+  - "sh -c 'echo deb https://pkg.jenkins.io/debian-stable binary/ > /etc/apt/sources.list.d/jenkins.list'"
+  - apt-get update -y
+  - apt-get install -y jenkins
+  - systemctl start jenkins
+  - systemctl enable jenkins
+  
+  # Install Docker
+  - "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg"
+  - "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable' | tee /etc/apt/sources.list.d/docker.list > /dev/null"
+  - apt-get update -y
+  - apt-get install -y docker-ce docker-ce-cli containerd.io
+  - usermod -aG docker ${admin_username}
+  
+  # Install Wazuh Server
+  - "echo 'Installing Wazuh Server...'"
+  - "curl -sO https://packages.wazuh.com/4.12/wazuh-install.sh"
+  - "curl -sO https://packages.wazuh.com/4.12/config.yml"
+  - chmod 744 wazuh-install.sh
+  - ./wazuh-install.sh -a -i
+  - systemctl enable wazuh-manager
+  - systemctl enable wazuh-indexer
+  - systemctl enable wazuh-dashboard
+  - "cp wazuh-install-files.tar /root"
+  
+  # Configure Wazuh Dashboard to bind to all interfaces
+  - "sed -i 's/server.host: localhost/server.host: 0.0.0.0/' /etc/wazuh-dashboard/opensearch_dashboards.yml"
+  - systemctl restart wazuh-dashboard
+  
+  # Create status file
+  - "echo 'Installation completed at $(date)' > /tmp/installation-complete.txt"
+  - "echo 'Jenkins initial admin password location: /var/lib/jenkins/secrets/initialAdminPassword' >> /tmp/installation-complete.txt"
+  - "echo 'Wazuh Dashboard URL: https://$(curl -s ifconfig.me):443' >> /tmp/installation-complete.txt"
+  - "echo 'Wazuh default credentials - User: admin, check /tmp/wazuh-passwords.txt for password' >> /tmp/installation-complete.txt"
+  - "cp /root/wazuh-install-files/wazuh-passwords.txt /tmp/ 2>/dev/null || echo 'Wazuh passwords file not found' >> /tmp/installation-complete.txt"
+
+write_files:
+  - path: /tmp/software-versions.sh
+    content: |
+      #!/bin/bash
+      echo "=== Installed Software Versions ==="
+      python3 --version
+      pip3 --version
+      ansible --version
+      java -version
+      jenkins --version
+      docker --version
+      echo "Wazuh Manager: $(systemctl is-active wazuh-manager)"
+      echo "Wazuh Indexer: $(systemctl is-active wazuh-indexer)"
+      echo "Wazuh Dashboard: $(systemctl is-active wazuh-dashboard)"
+    permissions: '0755'
+
+final_message: "Software installation completed successfully!"

@@ -1,0 +1,29 @@
+#cloud-config
+# Basic cloud-init script for minimal SOC setup
+package_update: true
+package_upgrade: true
+
+packages:
+  - python3
+  - python3-pip
+  - git
+  - curl
+  - wget
+
+runcmd:
+  # Basic setup
+  - apt-get update -y
+  - echo "Basic setup completed at $(date)" > /tmp/basic-setup-complete.txt
+  - echo "Admin user: ${admin_username}" >> /tmp/basic-setup-complete.txt
+
+write_files:
+  - path: /tmp/basic-info.sh
+    content: |
+      #!/bin/bash
+      echo "=== Basic System Info ==="
+      python3 --version
+      whoami
+      uptime
+    permissions: '0755'
+
+final_message: "Basic setup completed successfully!"
