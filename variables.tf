@@ -120,7 +120,7 @@ variable "auto_shutdown_time" {
 variable "auto_shutdown_timezone" {
   description = "Timezone for the auto-shutdown schedule"
   type        = string
-  default     = "CST"
+  default     = "Central Standard Time"
 }
 
 variable "auto_shutdown_enabled" {
@@ -133,4 +133,39 @@ variable "auto_shutdown_notification_email" {
   description = "Email address for shutdown notifications (optional)"
   type        = string
   default     = ""
+}
+
+variable "win11_vm_name" {
+  description = "Name of the Windows 11 virtual machine"
+  type        = string
+  default     = "win11"
+}
+
+variable "win11_vm_size" {
+  description = "Size of the Windows 11 virtual machine"
+  type        = string
+  default     = "Standard_D2s_v3"
+}
+
+variable "win11_admin_username" {
+  description = "Administrator username for the Windows 11 virtual machine"
+  type        = string
+  default     = "winadmin"
+}
+
+variable "win11_admin_password" {
+  description = "Administrator password for the Windows 11 virtual machine"
+  type        = string
+  sensitive   = true
+  
+  validation {
+    condition = length(var.win11_admin_password) >= 8 && can(regex("[A-Z]", var.win11_admin_password)) && can(regex("[a-z]", var.win11_admin_password)) && can(regex("[0-9]", var.win11_admin_password)) && can(regex("[^A-Za-z0-9]", var.win11_admin_password))
+    error_message = "Password must be at least 8 characters long and contain uppercase, lowercase, numeric, and special characters."
+  }
+}
+
+variable "win11_os_disk_name" {
+  description = "Name of the Windows 11 OS disk"
+  type        = string
+  default     = "win11-osdisk"
 }

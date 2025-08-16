@@ -2,12 +2,19 @@
 # Copy this file to terraform.tfvars and update with your values
 
 azure_region        = "centralus"
-resource_group_name = "My_Lab"
+resource_group_name = "My-SOC-Lab"
 control_vm_name     = "controlNode1"
 vm_size            = "Standard_DS1_v2"
 admin_username     = "adminuser"
 admin_password     = "YourSecurePassword123!"
 os_disk_name       = "controlNodeDisk1"
+
+# Windows 11 VM configuration
+win11_vm_name       = "win11-target"
+win11_vm_size       = "Standard_DS2_v2"
+win11_admin_username = "winadmin"
+win11_admin_password = "WindowsPassword123!"
+win11_os_disk_name  = "win11-disk"
 
 # Network configuration
 vnet_name                     = "lab-vnet"
