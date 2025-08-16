@@ -75,9 +75,23 @@ graph TB
 
 ## Quick Start
 1. Clone this repository
-2. Copy `terraform.tfvars.example` to `terraform.tfvars`
-3. Update variables in `terraform.tfvars` with your values
-4. Deploy the infrastructure:
+2. **Authenticate with Azure:**
+   ```bash
+   # Login to Azure
+   az login
+   
+   # List available subscriptions
+   az account list --output table
+   
+   # Set the subscription you want to use
+   az account set --subscription "your-subscription-id-or-name"
+   
+   # Verify the current subscription
+   az account show
+   ```
+3. Copy `terraform.tfvars.example` to `terraform.tfvars`
+4. Update variables in `terraform.tfvars` with your values
+5. Deploy the infrastructure:
    ```bash
    terraform init
    terraform plan
