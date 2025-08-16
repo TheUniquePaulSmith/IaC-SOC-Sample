@@ -44,9 +44,9 @@ graph TB
     Schedule -.-> Control
     Schedule -.-> Windows
     
-    classDef admin fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
-    classDef azure fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef security fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef admin fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20
+    classDef azure fill:#1976d2,stroke:#0d47a1,stroke-width:2px,color:#ffffff
+    classDef security fill:#f8bbd9,stroke:#c2185b,stroke-width:2px,color:#880e4f
     
     class Admin admin
     class Azure,Control,Windows azure
