@@ -7,7 +7,7 @@ variable "azure_region" {
 variable "resource_group_name" {
   description = "Name of the Azure resource group"
   type        = string
-  default     = "My-Lab"
+  default     = "SOC-Lab"
 }
 
 variable "control_vm_name" {
